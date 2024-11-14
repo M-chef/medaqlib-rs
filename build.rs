@@ -13,8 +13,8 @@ fn main() {
     // Configure and generate bindings.
     let bindings = builder()
         .header("MEDAQLib.h")
-        // .allowlist_type("SomeCoolClass")
-        // .allowlist_function("do_some_cool_thing")
+        .default_enum_style(bindgen::EnumVariation::Rust { non_exhaustive: false })
+        .generate_comments(true)
         .generate()
         .expect("Unable to generate bindings");
 
