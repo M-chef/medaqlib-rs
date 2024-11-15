@@ -1,4 +1,4 @@
-use std::{error::Error, ffi::CString, fmt::{Debug, Display}, net::Ipv4Addr, ops::{Add, AddAssign, Div}};
+use std::{error::Error, ffi::CString, fmt::{Debug, Display}, net::Ipv4Addr};
 
 #[allow(dead_code, non_camel_case_types, non_snake_case)]
 mod bindings {
@@ -9,17 +9,29 @@ use bindings::*;
 pub use bindings::ME_SENSOR;
 
 
+/// Builder for creating new Sensor instance and connect to it
+/// 
+/// # Example
+/// ```
+/// use medaq_lib::{Interface, SensorBuilder, ME_SENSOR};
+/// 
+/// let sensor = SensorBuilder::new(ME_SENSOR::SENSOR_IFD2421)
+///     .with_interface(Interface::TcpIp)
+///     .with_ip_address("10.10.10.10")
+///     .enable_logging()
+///     .connect()
+///     .unwrap();
+/// 
+
 #[derive(Default)]
 pub struct SensorBuilder {
     sensor_handle: u32,
-    interface: Option<IpInterface>,
+    interface: Option<Interface>,
     ip_address: Option<String>,
     logging: bool,
 }
 
 impl SensorBuilder {
-    
-
     pub fn new(sensor_type: ME_SENSOR) -> Self {
         let sensor_handle = unsafe {
             CreateSensorInstance(sensor_type)
@@ -28,7 +40,7 @@ impl SensorBuilder {
     }
 
     /// Select the interface to be used
-    pub fn with_interface(self, interface: IpInterface) -> Self {
+    pub fn with_interface(self, interface: Interface) -> Self {
         let interface = Some(interface);
         Self { interface, ..self }
     }
@@ -63,7 +75,7 @@ impl SensorBuilder {
         })
     }
 
-    fn set_interface(&self, interface: &IpInterface) -> Result<(), Box<dyn Error>> {
+    fn set_interface(&self, interface: &Interface) -> Result<(), Box<dyn Error>> {
         let param_name = CString::new("IP_Interface").expect("error creating cstring");
         let param_value = CString::new(interface.to_string()).expect("error creating cstring");
         self.set_parameter_string(param_name, param_value)
@@ -120,7 +132,7 @@ pub struct Sensor {
 }
 
 impl Sensor {
-    pub fn data_available(&self) -> Result<i32, Box<dyn Error>> {
+    fn data_available(&self) -> Result<i32, Box<dyn Error>> {
         let mut avail = 0;
         let result = unsafe {
             let avail = &mut avail as *mut i32;
@@ -131,8 +143,37 @@ impl Sensor {
         Ok(avail)
     }
 
+    /// Read data from sensor.
+    /// 
+    /// If no data available yet it will return `Ok(None)` otherwise `Ok(Data)`
+    /// 
+    /// # Example
+    /// ```
+    /// use std::time::Duration;
+    /// use medaq_lib::{Interface, SensorBuilder, ME_SENSOR};
+    /// 
+    /// let sensor = SensorBuilder::new(ME_SENSOR::SENSOR_IFD2421)
+    ///     .with_interface(Interface::TcpIp)
+    ///     .with_ip_address("10.10.10.10")
+    ///     .enable_logging()
+    ///     .connect()
+    ///     .unwrap();
+    /// 
+    /// loop {
+    ///     if let Ok(Some(data)) = sensor.read_data() {
+    ///         println!("First: {:?}", data.get_first_scaled(7));
+    ///         println!("Mean: {:?}", data.get_mean_scaled(7))
+    ///     }
+    ///     std::thread::sleep(Duration::from_millis(500));
+    /// }
+    /// ```
+    pub fn read_data(&self) -> Result<Option<Data>, Box<dyn Error>>{
 
-    pub fn read_data(&self, max_values: i32) -> Result<Data, Box<dyn Error>>{
+        let max_values = self.data_available()?;
+        if max_values == 0 {
+            return Ok(None);
+        }
+
         let mut raw_data: Vec<i32> = Vec::with_capacity(max_values as usize);
         let mut scaled_data: Vec<f64> = Vec::with_capacity(max_values as usize);
 
@@ -153,7 +194,7 @@ impl Sensor {
         };
         let result: Result<(), Box<dyn Error>> = result.into();
         result?;
-        Ok(Data { raw_data, scaled_data })
+        Ok(Some(Data { raw_data, scaled_data }))
     }
 
 }
@@ -169,7 +210,7 @@ impl Drop for Sensor {
 }
 
 #[derive(Debug, Clone, Copy)]
-pub enum IpInterface {
+pub enum Interface {
     RS232,
     If2004Usb,
     If2008,
@@ -178,16 +219,16 @@ pub enum IpInterface {
     WinUSB,
 }
     
-impl Display for IpInterface {
+impl Display for Interface {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         
         let s = match self {
-            IpInterface::RS232 => "RS232",
-            IpInterface::If2004Usb => "IF2004_USB",
-            IpInterface::If2008 => "IF2008",
-            IpInterface::If2008Eth => "IF2008_ETH",
-            IpInterface::TcpIp => "TCP/IP",
-            IpInterface::WinUSB => "WinUSB",
+            Interface::RS232 => "RS232",
+            Interface::If2004Usb => "IF2004_USB",
+            Interface::If2008 => "IF2008",
+            Interface::If2008Eth => "IF2008_ETH",
+            Interface::TcpIp => "TCP/IP",
+            Interface::WinUSB => "WinUSB",
         };
         
         write!(f, "{s}")
