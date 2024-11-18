@@ -1,4 +1,4 @@
-use std::{error::Error, ffi::CString, fmt::{Debug, Display}, net::Ipv4Addr};
+use std::{error::Error, ffi::CString, fmt::{Debug, Display}, iter, net::Ipv4Addr, vec};
 
 #[allow(dead_code, non_camel_case_types, non_snake_case)]
 mod bindings {
@@ -70,9 +70,14 @@ impl SensorBuilder {
         
         self.open_sensor()?;
 
-        Ok(Sensor {
-            sensor_handle: self.sensor_handle
-        })
+        let mut sensor = Sensor {
+            sensor_handle: self.sensor_handle,
+            parameters: vec![],
+        };
+
+        sensor.get_parameters()?;
+
+        Ok(sensor)
     }
 
     fn set_interface(&self, interface: &Interface) -> Result<(), Box<dyn Error>> {
@@ -94,52 +99,88 @@ impl SensorBuilder {
     }
     
     fn open_sensor(&self) -> Result<(), Box<dyn Error>> {
-        let result = unsafe {
-            OpenSensor(self.sensor_handle)   
-        };
-        result.into()
+        unsafe {
+            OpenSensor(self.sensor_handle).into()
+        }
+
     }
 
     fn set_parameter_string(&self, param_name: CString, param_value: CString) -> Result<(), Box<dyn Error>> {
-
         let param_name = param_name.as_ptr();
         let param_value = param_value.as_ptr();
 
-        let result = unsafe {
-            SetParameterString(self.sensor_handle, param_name, param_value)
-        };
-        result.into()
+        unsafe {
+            SetParameterString(self.sensor_handle, param_name, param_value).into()
+        }
     }
 
     fn set_parameter_int(&self, param_name: CString, param_value: bool) -> Result<(), Box<dyn Error>> {
-
         let param_name = param_name.as_ptr();
         let param_value = param_value as i32;
 
-        let result = unsafe {
-            SetParameterInt(self.sensor_handle, param_name, param_value)
-        };
-        result.into()
+        unsafe {
+            SetParameterInt(self.sensor_handle, param_name, param_value).into()
+        }
     }
     
     
 
 }
 
-
+#[derive(Debug)]
 pub struct Sensor {
     sensor_handle: u32,
+    parameters: Vec<String>,
 }
 
 impl Sensor {
+
+    fn get_parameters(&mut self) -> Result<(), Box<dyn Error>> {
+        let sensor_command = CString::new("Get_TransmittedDataInfo").expect("could not create cstring");
+        let mut counter = 0;
+
+        let param_names_repeater = iter::repeat_with(|| {
+            counter +=1;
+            CString::new(format!("IA_Scaled_Name{counter}")).expect("could not create cstring")
+        });
+
+        let sensor_command = sensor_command.as_ptr();
+        unsafe {
+            
+            ExecSCmd(self.sensor_handle, sensor_command).to_result()?;
+        }
+
+        for param_name in param_names_repeater {
+            let param_name = param_name.as_ptr();
+            let (c_string, mut max_len) = {
+                let s = "                                                                    ";
+                let return_value = CString::new(s).expect("could not create cstring");
+                let max_len = s.len() as u32;
+                (return_value, max_len)
+            };
+            let return_value_ptr = c_string.into_raw();
+            let max_len = &mut max_len as *mut u32;
+            let return_value = unsafe {
+                GetParameterString(self.sensor_handle, param_name, return_value_ptr, max_len).to_result()?;
+                CString::from_raw(return_value_ptr)
+            }.into_string()?;
+            
+            if return_value.is_empty() {
+                break;
+            }
+            self.parameters.push(return_value);
+            
+        };
+
+        Ok(())
+    }
+
     fn data_available(&self) -> Result<i32, Box<dyn Error>> {
         let mut avail = 0;
-        let result = unsafe {
+        unsafe {
             let avail = &mut avail as *mut i32;
-            DataAvail(self.sensor_handle, avail)
+            DataAvail(self.sensor_handle, avail).to_result()?;
         };
-        let result: Result<(), Box<dyn Error>> = result.into();
-        result?;
         Ok(avail)
     }
 
@@ -179,22 +220,18 @@ impl Sensor {
 
         let mut read = 0;
         
-        let result = unsafe {
+        unsafe {
             // Ensure the vectors have allocated space by setting their length
             raw_data.set_len(max_values as usize);
             scaled_data.set_len(max_values as usize);
 
-            let transfer_data = TransferData(self.sensor_handle, raw_data.as_mut_ptr(), scaled_data.as_mut_ptr(), max_values, &mut read);
+            TransferData(self.sensor_handle, raw_data.as_mut_ptr(), scaled_data.as_mut_ptr(), max_values, &mut read).to_result()?;
 
             // Adjust the lengths to the actual number of values read
             raw_data.set_len(read as usize);
             scaled_data.set_len(read as usize);
-
-            transfer_data
         };
-        let result: Result<(), Box<dyn Error>> = result.into();
-        result?;
-        Ok(Some(Data { raw_data, scaled_data }))
+        Ok(Some(Data { channels: self.parameters.clone(), raw_data, scaled_data }))
     }
 
 }
@@ -244,6 +281,12 @@ impl From<ERR_CODE> for Result<(), Box<dyn Error>> {
     }
 }
 
+impl ERR_CODE {
+    fn to_result(self) -> Result<(), Box<dyn Error>> {
+        self.into()
+    }
+}
+
 impl Error for ERR_CODE {}
 
 impl Display for ERR_CODE {
@@ -255,6 +298,7 @@ impl Display for ERR_CODE {
 
 #[derive(Debug)]
 pub struct Data {
+    channels: Vec<String>,
     raw_data: Vec<i32>,
     scaled_data: Vec<f64>,
 }
@@ -262,23 +306,23 @@ pub struct Data {
 impl Data {
 
     /// Get raw values of very first measurement
-    pub fn get_first_raw(&self, channels: usize) -> &[i32] {
-        self.raw_data.get_first(channels)
+    pub fn get_first_raw(&self) -> &[i32] {
+        self.raw_data.get_first(self.channels.len())
     }
     
     /// Calculates mean of raw values for all channels
-    pub fn get_mean_raw(&self, channels: usize) -> Vec<f64> {
-        self.raw_data.means(channels)
+    pub fn get_mean_raw(&self) -> Vec<f64> {
+        self.raw_data.means(self.channels.len())
     }
 
     /// Get scaled values of very first measurement
-    pub fn get_first_scaled(&self, channels: usize) -> &[f64] {
-        self.scaled_data.get_first(channels)
+    pub fn get_first_scaled(&self) -> &[f64] {
+        self.scaled_data.get_first(self.channels.len())
     }
 
     /// Calculates mean of scaled values for all channels
-    pub fn get_mean_scaled(&self, channels: usize) -> Vec<f64> {
-        self.scaled_data.means(channels)
+    pub fn get_mean_scaled(&self) -> Vec<f64> {
+        self.scaled_data.means(self.channels.len())
     }
 
 }
@@ -320,17 +364,15 @@ mod tests {
 
     #[test]
     fn test_get_mean_raw_test() {
-        let data = Data { raw_data: vec![1, 2, 3, 4, 5, 6, 2, 3, 4], scaled_data: vec![] };
-        let channels = 3;
-        let means = data.get_mean_raw(channels);
+        let data = Data { channels: vec!["1".to_string(), "2".to_string(), "3".to_string()], raw_data: vec![1, 2, 3, 4, 5, 6, 2, 3, 4], scaled_data: vec![] };
+        let means = data.get_mean_raw();
         assert_eq!(means, vec![7./3., 10./3., 13./3.])
     }
 
     #[test]
     fn test_get_mean_scaled_test() {
-        let data = Data { raw_data: vec![], scaled_data: vec![1., 2., 3., 4., 5., 6., 2., 3., 4.] };
-        let channels = 3;
-        let means = data.get_mean_scaled(channels);
+        let data = Data { channels: vec!["1".to_string(), "2".to_string(), "3".to_string()], raw_data: vec![], scaled_data: vec![1., 2., 3., 4., 5., 6., 2., 3., 4.] };
+        let means = data.get_mean_scaled();
         assert_eq!(means, vec![7./3., 10./3., 13./3.])
     }
 }
