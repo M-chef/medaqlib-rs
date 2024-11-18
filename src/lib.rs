@@ -1,27 +1,33 @@
-use std::{error::Error, ffi::CString, fmt::{Debug, Display}, iter, net::Ipv4Addr, vec};
+use std::{
+    error::Error,
+    ffi::CString,
+    fmt::{Debug, Display},
+    iter,
+    net::Ipv4Addr,
+    vec,
+};
 
 #[allow(dead_code, non_camel_case_types, non_snake_case)]
 mod bindings {
     include!(concat!(env!("OUT_DIR"), "/bindings.rs"));
 }
 
-use bindings::*;
 pub use bindings::ME_SENSOR;
-
+use bindings::*;
 
 /// Builder for creating new Sensor instance and connect to it
-/// 
+///
 /// # Example
 /// ```
 /// use medaq_lib::{Interface, SensorBuilder, ME_SENSOR};
-/// 
+///
 /// let sensor = SensorBuilder::new(ME_SENSOR::SENSOR_IFD2421)
 ///     .with_interface(Interface::TcpIp)
 ///     .with_ip_address("10.10.10.10")
 ///     .enable_logging()
 ///     .connect()
 ///     .unwrap();
-/// 
+///
 
 #[derive(Default)]
 pub struct SensorBuilder {
@@ -33,10 +39,11 @@ pub struct SensorBuilder {
 
 impl SensorBuilder {
     pub fn new(sensor_type: ME_SENSOR) -> Self {
-        let sensor_handle = unsafe {
-            CreateSensorInstance(sensor_type)
-        };
-        Self { sensor_handle, ..Default::default() }
+        let sensor_handle = unsafe { CreateSensorInstance(sensor_type) };
+        Self {
+            sensor_handle,
+            ..Default::default()
+        }
     }
 
     /// Select the interface to be used
@@ -52,14 +59,19 @@ impl SensorBuilder {
 
     /// enable Logfile writing
     pub fn enable_logging(self) -> Self {
-        Self { logging: true, ..self }
+        Self {
+            logging: true,
+            ..self
+        }
     }
 
     pub fn connect(self) -> Result<Sensor, Box<dyn Error>> {
         let interface = self.interface.ok_or("no interface provided")?;
         self.set_interface(&interface)?;
 
-        let ip_address = self.ip_address.as_ref()
+        let ip_address = self
+            .ip_address
+            .as_ref()
             .ok_or("no ip address provided")?
             .parse()?;
         self.set_ip_address(&ip_address)?;
@@ -67,7 +79,7 @@ impl SensorBuilder {
         if self.logging {
             self.set_enable_logging()?;
         }
-        
+
         self.open_sensor()?;
 
         let mut sensor = Sensor {
@@ -97,34 +109,32 @@ impl SensorBuilder {
         let param_value = true;
         self.set_parameter_int(param_name, param_value)
     }
-    
-    fn open_sensor(&self) -> Result<(), Box<dyn Error>> {
-        unsafe {
-            OpenSensor(self.sensor_handle).into()
-        }
 
+    fn open_sensor(&self) -> Result<(), Box<dyn Error>> {
+        unsafe { OpenSensor(self.sensor_handle).into() }
     }
 
-    fn set_parameter_string(&self, param_name: CString, param_value: CString) -> Result<(), Box<dyn Error>> {
+    fn set_parameter_string(
+        &self,
+        param_name: CString,
+        param_value: CString,
+    ) -> Result<(), Box<dyn Error>> {
         let param_name = param_name.as_ptr();
         let param_value = param_value.as_ptr();
 
-        unsafe {
-            SetParameterString(self.sensor_handle, param_name, param_value).into()
-        }
+        unsafe { SetParameterString(self.sensor_handle, param_name, param_value).into() }
     }
 
-    fn set_parameter_int(&self, param_name: CString, param_value: bool) -> Result<(), Box<dyn Error>> {
+    fn set_parameter_int(
+        &self,
+        param_name: CString,
+        param_value: bool,
+    ) -> Result<(), Box<dyn Error>> {
         let param_name = param_name.as_ptr();
         let param_value = param_value as i32;
 
-        unsafe {
-            SetParameterInt(self.sensor_handle, param_name, param_value).into()
-        }
+        unsafe { SetParameterInt(self.sensor_handle, param_name, param_value).into() }
     }
-    
-    
-
 }
 
 #[derive(Debug)]
@@ -134,19 +144,18 @@ pub struct Sensor {
 }
 
 impl Sensor {
-
     fn get_parameters(&mut self) -> Result<(), Box<dyn Error>> {
-        let sensor_command = CString::new("Get_TransmittedDataInfo").expect("could not create cstring");
+        let sensor_command =
+            CString::new("Get_TransmittedDataInfo").expect("could not create cstring");
         let mut counter = 0;
 
         let param_names_repeater = iter::repeat_with(|| {
-            counter +=1;
+            counter += 1;
             CString::new(format!("IA_Scaled_Name{counter}")).expect("could not create cstring")
         });
 
         let sensor_command = sensor_command.as_ptr();
         unsafe {
-            
             ExecSCmd(self.sensor_handle, sensor_command).to_result()?;
         }
 
@@ -161,16 +170,17 @@ impl Sensor {
             let return_value_ptr = c_string.into_raw();
             let max_len = &mut max_len as *mut u32;
             let return_value = unsafe {
-                GetParameterString(self.sensor_handle, param_name, return_value_ptr, max_len).to_result()?;
+                GetParameterString(self.sensor_handle, param_name, return_value_ptr, max_len)
+                    .to_result()?;
                 CString::from_raw(return_value_ptr)
-            }.into_string()?;
-            
+            }
+            .into_string()?;
+
             if return_value.is_empty() {
                 break;
             }
             self.parameters.push(return_value);
-            
-        };
+        }
 
         Ok(())
     }
@@ -185,21 +195,21 @@ impl Sensor {
     }
 
     /// Read data from sensor.
-    /// 
+    ///
     /// If no data available yet it will return `Ok(None)` otherwise `Ok(Data)`
-    /// 
+    ///
     /// # Example
     /// ```
     /// use std::time::Duration;
     /// use medaq_lib::{Interface, SensorBuilder, ME_SENSOR};
-    /// 
+    ///
     /// let sensor = SensorBuilder::new(ME_SENSOR::SENSOR_IFD2421)
     ///     .with_interface(Interface::TcpIp)
     ///     .with_ip_address("10.10.10.10")
     ///     .enable_logging()
     ///     .connect()
     ///     .unwrap();
-    /// 
+    ///
     /// loop {
     ///     if let Ok(Some(data)) = sensor.read_data() {
     ///         println!("First: {:?}", data.get_first_scaled(7));
@@ -208,8 +218,7 @@ impl Sensor {
     ///     std::thread::sleep(Duration::from_millis(500));
     /// }
     /// ```
-    pub fn read_data(&self) -> Result<Option<Data>, Box<dyn Error>>{
-
+    pub fn read_data(&self) -> Result<Option<Data>, Box<dyn Error>> {
         let max_values = self.data_available()?;
         if max_values == 0 {
             return Ok(None);
@@ -219,21 +228,31 @@ impl Sensor {
         let mut scaled_data: Vec<f64> = Vec::with_capacity(max_values as usize);
 
         let mut read = 0;
-        
+
         unsafe {
             // Ensure the vectors have allocated space by setting their length
             raw_data.set_len(max_values as usize);
             scaled_data.set_len(max_values as usize);
 
-            TransferData(self.sensor_handle, raw_data.as_mut_ptr(), scaled_data.as_mut_ptr(), max_values, &mut read).to_result()?;
+            TransferData(
+                self.sensor_handle,
+                raw_data.as_mut_ptr(),
+                scaled_data.as_mut_ptr(),
+                max_values,
+                &mut read,
+            )
+            .to_result()?;
 
             // Adjust the lengths to the actual number of values read
             raw_data.set_len(read as usize);
             scaled_data.set_len(read as usize);
         };
-        Ok(Some(Data { channels: self.parameters.clone(), raw_data, scaled_data }))
+        Ok(Some(Data {
+            channels: self.parameters.clone(),
+            raw_data,
+            scaled_data,
+        }))
     }
-
 }
 
 impl Drop for Sensor {
@@ -255,10 +274,9 @@ pub enum Interface {
     TcpIp,
     WinUSB,
 }
-    
+
 impl Display for Interface {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        
         let s = match self {
             Interface::RS232 => "RS232",
             Interface::If2004Usb => "IF2004_USB",
@@ -267,7 +285,7 @@ impl Display for Interface {
             Interface::TcpIp => "TCP/IP",
             Interface::WinUSB => "WinUSB",
         };
-        
+
         write!(f, "{s}")
     }
 }
@@ -295,8 +313,6 @@ impl Display for ERR_CODE {
     }
 }
 
-
-#[derive(Debug)]
 pub struct Data {
     channels: Vec<String>,
     raw_data: Vec<i32>,
@@ -304,12 +320,11 @@ pub struct Data {
 }
 
 impl Data {
-
     /// Get raw values of very first measurement
     pub fn get_first_raw(&self) -> &[i32] {
         self.raw_data.get_first(self.channels.len())
     }
-    
+
     /// Calculates mean of raw values for all channels
     pub fn get_mean_raw(&self) -> Vec<f64> {
         self.raw_data.means(self.channels.len())
@@ -324,7 +339,17 @@ impl Data {
     pub fn get_mean_scaled(&self) -> Vec<f64> {
         self.scaled_data.means(self.channels.len())
     }
+}
 
+impl Display for Data {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let means = self.get_mean_scaled();
+        let s: Vec<_> = self.channels.iter().enumerate().map(|(idx, channel)| {
+            format!("{channel}: {:.5} ", means[idx])
+        }).collect();
+        write!(f, "{}", s.join(" "))
+        
+    }
 }
 
 trait DataTransformation<'a, T> {
@@ -332,8 +357,9 @@ trait DataTransformation<'a, T> {
     fn get_first(&self, channels: usize) -> &[T];
 }
 
-impl<'a, T: 'a> DataTransformation<'a, T> for Vec<T> 
-    where T: Clone + Copy + Into<f64>,
+impl<'a, T: 'a> DataTransformation<'a, T> for Vec<T>
+where
+    T: Clone + Copy + Into<f64>,
 {
     fn means(&'a self, channels: usize) -> Vec<f64> {
         self.chunks(channels)
@@ -346,17 +372,12 @@ impl<'a, T: 'a> DataTransformation<'a, T> for Vec<T>
                 }
                 acc
             })
-
-        
     }
-    
+
     fn get_first(&self, channels: usize) -> &[T] {
         &self[0..channels]
     }
-
-    
 }
-
 
 #[cfg(test)]
 mod tests {
@@ -364,15 +385,34 @@ mod tests {
 
     #[test]
     fn test_get_mean_raw_test() {
-        let data = Data { channels: vec!["1".to_string(), "2".to_string(), "3".to_string()], raw_data: vec![1, 2, 3, 4, 5, 6, 2, 3, 4], scaled_data: vec![] };
+        let data = Data {
+            channels: vec!["1".to_string(), "2".to_string(), "3".to_string()],
+            raw_data: vec![1, 2, 3, 4, 5, 6, 2, 3, 4],
+            scaled_data: vec![],
+        };
         let means = data.get_mean_raw();
-        assert_eq!(means, vec![7./3., 10./3., 13./3.])
+        assert_eq!(means, vec![7. / 3., 10. / 3., 13. / 3.])
     }
 
     #[test]
     fn test_get_mean_scaled_test() {
-        let data = Data { channels: vec!["1".to_string(), "2".to_string(), "3".to_string()], raw_data: vec![], scaled_data: vec![1., 2., 3., 4., 5., 6., 2., 3., 4.] };
+        let data = Data {
+            channels: vec!["1".to_string(), "2".to_string(), "3".to_string()],
+            raw_data: vec![],
+            scaled_data: vec![1., 2., 3., 4., 5., 6., 2., 3., 4.],
+        };
         let means = data.get_mean_scaled();
-        assert_eq!(means, vec![7./3., 10./3., 13./3.])
+        assert_eq!(means, vec![7. / 3., 10. / 3., 13. / 3.])
+    }
+
+    #[test]
+    #[ignore = "manual test"]
+    fn test_display_data() {
+        let data = Data {
+            channels: vec!["1".to_string(), "2".to_string(), "3".to_string()],
+            raw_data: vec![],
+            scaled_data: vec![1., 2., 3., 4., 5., 6., 2., 3., 4.],
+        };
+        println!("{data}");
     }
 }
