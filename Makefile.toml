@@ -1,0 +1,3 @@
+[tasks.generate-bindings]
+command = "bindgen"
+args = ["./MEDAQLib.h", "--default-enum-style=rust", "-o", "./src/bindings.rs"]

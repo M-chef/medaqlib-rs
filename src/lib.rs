@@ -1,14 +1,20 @@
 use std::{
-    error::Error, ffi::CString, fmt::{Debug, Display}, iter, net::Ipv4Addr, sync::mpsc::channel, vec
+    error::Error, ffi::CString, fmt::{Debug, Display}, iter, net::Ipv4Addr, sync::LazyLock, vec
 };
 
 #[allow(dead_code, non_camel_case_types, non_snake_case)]
-mod bindings {
-    include!(concat!(env!("OUT_DIR"), "/bindings.rs"));
-}
+// mod bindings {
+//     include!(concat!(env!("OUT_DIR"), "/bindings.rs"));
+// }
+mod bindings;
 
 pub use bindings::ME_SENSOR;
 use bindings::*;
+
+const MEDAQLIB_DLL: &str = "MEDAQLib.dll";
+static MEDAQLIB: LazyLock<MEDAQLib> = LazyLock::new(|| unsafe {
+    MEDAQLib::new(MEDAQLIB_DLL).expect("could not find dll")
+});
 
 /// Builder for creating new Sensor instance and connect to it
 ///
@@ -34,7 +40,7 @@ pub struct SensorBuilder {
 
 impl SensorBuilder {
     pub fn new(sensor_type: ME_SENSOR) -> Self {
-        let sensor_handle = unsafe { CreateSensorInstance(sensor_type) };
+        let sensor_handle = unsafe { MEDAQLIB.CreateSensorInstance(sensor_type) };
         Self {
             sensor_handle,
             ..Default::default()
@@ -106,7 +112,7 @@ impl SensorBuilder {
     }
 
     fn open_sensor(&self) -> Result<(), Box<dyn Error>> {
-        unsafe { OpenSensor(self.sensor_handle).into() }
+        unsafe { MEDAQLIB.OpenSensor(self.sensor_handle).into() }
     }
 
     fn set_parameter_string(
@@ -117,7 +123,7 @@ impl SensorBuilder {
         let param_name = param_name.as_ptr();
         let param_value = param_value.as_ptr();
 
-        unsafe { SetParameterString(self.sensor_handle, param_name, param_value).into() }
+        unsafe { MEDAQLIB.SetParameterString(self.sensor_handle, param_name, param_value).into() }
     }
 
     fn set_parameter_int(
@@ -128,7 +134,7 @@ impl SensorBuilder {
         let param_name = param_name.as_ptr();
         let param_value = param_value as i32;
 
-        unsafe { SetParameterInt(self.sensor_handle, param_name, param_value).into() }
+        unsafe { MEDAQLIB.SetParameterInt(self.sensor_handle, param_name, param_value).into() }
     }
 }
 
@@ -151,7 +157,7 @@ impl Sensor {
 
         let sensor_command = sensor_command.as_ptr();
         unsafe {
-            ExecSCmd(self.sensor_handle, sensor_command).to_result()?;
+            MEDAQLIB.ExecSCmd(self.sensor_handle, sensor_command).to_result()?;
         }
 
         for param_name in param_names_repeater {
@@ -165,7 +171,7 @@ impl Sensor {
             let return_value_ptr = c_string.into_raw();
             let max_len = &mut max_len as *mut u32;
             let return_value = unsafe {
-                GetParameterString(self.sensor_handle, param_name, return_value_ptr, max_len)
+                MEDAQLIB.GetParameterString(self.sensor_handle, param_name, return_value_ptr, max_len)
                     .to_result()?;
                 CString::from_raw(return_value_ptr)
             }
@@ -188,7 +194,7 @@ impl Sensor {
         let mut avail = 0;
         unsafe {
             let avail = &mut avail as *mut i32;
-            DataAvail(self.sensor_handle, avail).to_result()?;
+            MEDAQLIB.DataAvail(self.sensor_handle, avail).to_result()?;
         };
         Ok(avail)
     }
@@ -233,7 +239,7 @@ impl Sensor {
             raw_data.set_len(max_values as usize);
             scaled_data.set_len(max_values as usize);
 
-            TransferData(
+            MEDAQLIB.TransferData(
                 self.sensor_handle,
                 raw_data.as_mut_ptr(),
                 scaled_data.as_mut_ptr(),
@@ -258,8 +264,8 @@ impl Drop for Sensor {
     fn drop(&mut self) {
         println!("release sensor...");
         unsafe {
-            CloseSensor(self.sensor_handle);
-            ReleaseSensorInstance(self.sensor_handle);
+            MEDAQLIB.CloseSensor(self.sensor_handle);
+            MEDAQLIB.ReleaseSensorInstance(self.sensor_handle);
         }
     }
 }
