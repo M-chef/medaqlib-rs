@@ -1,10 +1,5 @@
 use std::{
-    error::Error,
-    ffi::CString,
-    fmt::{Debug, Display},
-    iter,
-    net::Ipv4Addr,
-    vec,
+    error::Error, ffi::CString, fmt::{Debug, Display}, iter, net::Ipv4Addr, sync::mpsc::channel, vec
 };
 
 #[allow(dead_code, non_camel_case_types, non_snake_case)]
@@ -185,6 +180,10 @@ impl Sensor {
         Ok(())
     }
 
+    pub fn parameters(&self) -> &[String] {
+        &self.parameters
+    }
+
     fn data_available(&self) -> Result<i32, Box<dyn Error>> {
         let mut avail = 0;
         unsafe {
@@ -321,67 +320,94 @@ pub struct Data {
 
 impl Data {
     /// Get raw values of very first measurement
-    pub fn get_first_raw(&self) -> &[i32] {
-        self.raw_data.get_first(self.channels.len())
+    pub fn get_first_raw(&self) ->  Vec<ChannelValue<'_, i32>> {
+        self.raw_data.get_first(&self.channels)
     }
 
     /// Calculates mean of raw values for all channels
-    pub fn get_mean_raw(&self) -> Vec<f64> {
-        self.raw_data.means(self.channels.len())
+    pub fn get_mean_raw(&self) -> Vec<ChannelValue<'_, f64>> {
+        self.raw_data.means(&self.channels)
     }
 
     /// Get scaled values of very first measurement
-    pub fn get_first_scaled(&self) -> &[f64] {
-        self.scaled_data.get_first(self.channels.len())
+    pub fn get_first_scaled(&self) ->  Vec<ChannelValue<'_, f64>> {
+        self.scaled_data.get_first(&self.channels)
     }
 
     /// Calculates mean of scaled values for all channels
-    pub fn get_mean_scaled(&self) -> Vec<f64> {
-        self.scaled_data.means(self.channels.len())
+    pub fn get_mean_scaled(&self) ->  Vec<ChannelValue<'_, f64>> {
+        self.scaled_data.means(&self.channels)
+    }
+}
+
+#[derive(Debug, PartialEq)]
+pub struct ChannelValue<'a, T> {
+    pub channel: &'a str,
+    pub value: T,
+}
+
+impl<T: Display> Display for ChannelValue<'_, T> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}: {}", self.channel, self.value)
     }
 }
 
 impl Display for Data {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let means = self.get_mean_scaled();
-        let s: Vec<_> = self.channels.iter().enumerate().map(|(idx, channel)| {
-            format!("{channel}: {:.5} ", means[idx])
-        }).collect();
-        write!(f, "{}", s.join(" "))
+        let means: Vec<_> = self.get_mean_scaled().iter().map(|ch| ch.to_string()).collect();
+        write!(f, "{}", means.join(" "))
         
     }
 }
 
 trait DataTransformation<'a, T> {
-    fn means(&'a self, channels: usize) -> Vec<f64>;
-    fn get_first(&self, channels: usize) -> &[T];
+    fn means(&'a self, channels: &'a[String]) -> Vec<ChannelValue<'a, f64>>;
+    fn get_first(&'a self, channels: &'a [String]) -> Vec<ChannelValue<'a, T>>;
 }
 
 impl<'a, T: 'a> DataTransformation<'a, T> for Vec<T>
 where
-    T: Clone + Copy + Into<f64>,
+    T: Clone + Copy + Into<f64>, 
 {
-    fn means(&'a self, channels: usize) -> Vec<f64> {
-        self.chunks(channels)
+    fn means(&'a self, channels: &'a [String]) -> Vec<ChannelValue<'a, f64>> {
+        let len_channels = channels.len();
+        let values_mean = self.chunks(len_channels)
             .enumerate()
-            .fold(vec![0.; channels], |mut acc, (iteration, chunk)| {
+            .fold(vec![0.; len_channels], |mut acc, (iteration, chunk)| {
                 for (curr_mean, new_value) in acc.iter_mut().zip(chunk) {
                     let new_value: f64 = (*new_value).into();
                     let count = (iteration + 1) as f64;
                     *curr_mean = *curr_mean + (new_value - *curr_mean) / count;
                 }
                 acc
-            })
+            });
+        values_mean.iter().zip(channels).map(|(&value, channel)| ChannelValue { channel, value}).collect()
     }
 
-    fn get_first(&self, channels: usize) -> &[T] {
-        &self[0..channels]
+    fn get_first(&'a self, channels: &'a [String]) -> Vec<ChannelValue<'a, T>> {
+        let values = &self[0..channels.len()];
+        values.iter().zip(channels).map(|(&value, channel)| ChannelValue { channel, value}).collect()
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use crate::Data;
+    use crate::{ChannelValue, Data};
+
+    #[test]
+    fn test_get_first_raw_test() {
+        let data = Data {
+            channels: vec!["1".to_string(), "2".to_string(), "3".to_string()],
+            raw_data: vec![1, 2, 3, 4, 5, 6, 2, 3, 4],
+            scaled_data: vec![],
+        };
+        let means = data.get_first_raw();
+        assert_eq!(means, vec![
+            ChannelValue {channel: "1", value: 1},
+            ChannelValue {channel: "2", value: 2},
+            ChannelValue {channel: "3", value: 3}
+        ])
+    }
 
     #[test]
     fn test_get_mean_raw_test() {
@@ -391,7 +417,11 @@ mod tests {
             scaled_data: vec![],
         };
         let means = data.get_mean_raw();
-        assert_eq!(means, vec![7. / 3., 10. / 3., 13. / 3.])
+        assert_eq!(means, vec![
+            ChannelValue {channel: "1", value: 7. / 3.},
+            ChannelValue {channel: "2", value: 10. / 3.},
+            ChannelValue {channel: "3", value: 13. / 3.}
+        ])
     }
 
     #[test]
@@ -402,7 +432,11 @@ mod tests {
             scaled_data: vec![1., 2., 3., 4., 5., 6., 2., 3., 4.],
         };
         let means = data.get_mean_scaled();
-        assert_eq!(means, vec![7. / 3., 10. / 3., 13. / 3.])
+        assert_eq!(means, vec![
+            ChannelValue {channel: "1", value: 7. / 3.},
+            ChannelValue {channel: "2", value: 10. / 3.},
+            ChannelValue {channel: "3", value: 13. / 3.}
+        ])
     }
 
     #[test]
