@@ -171,9 +171,12 @@ impl Sensor {
             let return_value_ptr = c_string.into_raw();
             let max_len = &mut max_len as *mut u32;
             let return_value = unsafe {
-                MEDAQLIB.GetParameterString(self.sensor_handle, param_name, return_value_ptr, max_len)
-                    .to_result()?;
-                CString::from_raw(return_value_ptr)
+                if MEDAQLIB.GetParameterString(self.sensor_handle, param_name, return_value_ptr, max_len)
+                    .to_result().is_ok() {
+                        CString::from_raw(return_value_ptr)
+                    } else {
+                        CString::new("").expect("could not create cstring")
+                    }
             }
             .into_string()?;
 
