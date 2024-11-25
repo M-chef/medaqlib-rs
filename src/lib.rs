@@ -220,8 +220,8 @@ impl Sensor {
     ///
     /// loop {
     ///     if let Ok(Some(data)) = sensor.read_data() {
-    ///         println!("First: {:?}", data.get_first_scaled(7));
-    ///         println!("Mean: {:?}", data.get_mean_scaled(7))
+    ///         println!("First: {:?}", data.get_first_scaled());
+    ///         println!("Mean: {:?}", data.get_mean_scaled())
     ///     }
     ///     std::thread::sleep(Duration::from_millis(500));
     /// }

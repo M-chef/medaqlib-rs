@@ -1,5 +1,5 @@
 [package]
-name = "medaq_lib"
+name = "medaqlib"
 version = "0.1.0"
 edition = "2021"
 
@@ -7,5 +7,4 @@ edition = "2021"
 bindgen = "0.70.1"
 
 [dependencies]
-ctrlc = "3.4.5"
 libloading = "0.8.5"
