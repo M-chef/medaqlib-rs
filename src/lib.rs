@@ -352,7 +352,7 @@ impl Data {
 #[derive(Debug, PartialEq)]
 pub struct ChannelValue<'a, T> {
     pub channel: &'a str,
-    pub value: T,
+    pub value: Value<T>,
 }
 
 impl<T: Display> Display for ChannelValue<'_, T> {
@@ -366,6 +366,37 @@ impl Display for Data {
         let means: Vec<_> = self.get_mean_scaled().iter().map(|ch| ch.to_string()).collect();
         write!(f, "{}", means.join(" "))
         
+    }
+}
+
+#[derive(Debug, PartialEq, Clone, Copy)]
+pub enum Value<T> {
+    Valid(T),
+    OutOfRange
+}
+
+impl<T: Display> Display for Value<T> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let val = match self {
+            Value::Valid(v) => v.to_string(),
+            Value::OutOfRange => "OutOfRange".into(),
+        };
+        write!(f, "{}", val)
+    }
+}
+
+impl<T: Default> Default for Value<T> {
+    fn default() -> Self {
+        Value::Valid(T::default())
+    }
+}
+
+impl<T> Value<T> {
+    pub fn into_raw(self) -> Option<T> {
+        match self {
+            Value::Valid(value) => Some(value),
+            Value::OutOfRange => None,
+        }
     }
 }
 
@@ -390,12 +421,24 @@ where
                 }
                 acc
             });
-        values_mean.iter().zip(channels).map(|(&value, channel)| ChannelValue { channel, value}).collect()
+        values_mean.iter().zip(channels).map(|(&value, channel)| {
+            let value = match value {
+                v if v < 0. => Value::OutOfRange,
+                v => Value::Valid(v)
+            };
+            ChannelValue { channel, value}
+        }).collect()
     }
 
     fn get_first(&'a self, channels: &'a [String]) -> Vec<ChannelValue<'a, T>> {
         let values = &self[0..channels.len()];
-        values.iter().zip(channels).map(|(&value, channel)| ChannelValue { channel, value}).collect()
+        values.iter().zip(channels).map(|(&value, channel)| {
+            let value = match value {
+                v if v.into() < 0. => Value::OutOfRange,
+                v => Value::Valid(v)
+            };
+            ChannelValue { channel, value}
+        }).collect()
     }
 }
 
@@ -412,9 +455,9 @@ mod tests {
         };
         let means = data.get_first_raw();
         assert_eq!(means, vec![
-            ChannelValue {channel: "1", value: 1},
-            ChannelValue {channel: "2", value: 2},
-            ChannelValue {channel: "3", value: 3}
+            ChannelValue {channel: "1", value: crate::Value::Valid(1)},
+            ChannelValue {channel: "2", value: crate::Value::Valid(2)},
+            ChannelValue {channel: "3", value: crate::Value::Valid(3)}
         ])
     }
 
@@ -427,9 +470,9 @@ mod tests {
         };
         let means = data.get_mean_raw();
         assert_eq!(means, vec![
-            ChannelValue {channel: "1", value: 7. / 3.},
-            ChannelValue {channel: "2", value: 10. / 3.},
-            ChannelValue {channel: "3", value: 13. / 3.}
+            ChannelValue {channel: "1", value: crate::Value::Valid(7. / 3.)},
+            ChannelValue {channel: "2", value: crate::Value::Valid(10. / 3.)},
+            ChannelValue {channel: "3", value: crate::Value::Valid(13. / 3.)}
         ])
     }
 
@@ -442,9 +485,24 @@ mod tests {
         };
         let means = data.get_mean_scaled();
         assert_eq!(means, vec![
-            ChannelValue {channel: "1", value: 7. / 3.},
-            ChannelValue {channel: "2", value: 10. / 3.},
-            ChannelValue {channel: "3", value: 13. / 3.}
+            ChannelValue {channel: "1", value: crate::Value::Valid(7. / 3.)},
+            ChannelValue {channel: "2", value: crate::Value::Valid(10. / 3.)},
+            ChannelValue {channel: "3", value: crate::Value::Valid(13. / 3.)}
+        ])
+    }
+
+    #[test]
+    fn test_get_mean_scaled_out_of_range_test() {
+        let data = Data {
+            channels: vec!["1".to_string(), "2".to_string(), "3".to_string()],
+            raw_data: vec![],
+            scaled_data: vec![-1.7976931348623157e308, 2., 3., -1.7976931348623157e308, 5., 6., -1.7976931348623157e308, 3., 4.],
+        };
+        let means = data.get_mean_scaled();
+        assert_eq!(means, vec![
+            ChannelValue {channel: "1", value: crate::Value::OutOfRange},
+            ChannelValue {channel: "2", value: crate::Value::Valid(10. / 3.)},
+            ChannelValue {channel: "3", value: crate::Value::Valid(13. / 3.)}
         ])
     }
 
