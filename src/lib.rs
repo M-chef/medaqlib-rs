@@ -410,21 +410,26 @@ where
     T: Clone + Copy + Into<f64>, 
 {
     fn means(&'a self, channels: &'a [String]) -> Vec<ChannelValue<'a, f64>> {
-        let len_channels = channels.len();
-        let values_mean = self.chunks(len_channels)
-            .enumerate()
-            .fold(vec![0.; len_channels], |mut acc, (iteration, chunk)| {
-                for (curr_mean, new_value) in acc.iter_mut().zip(chunk) {
-                    let new_value: f64 = (*new_value).into();
-                    let count = (iteration + 1) as f64;
-                    *curr_mean = *curr_mean + (new_value - *curr_mean) / count;
-                }
-                acc
-            });
-        values_mean.iter().zip(channels).map(|(&value, channel)| {
-            let value = match value {
-                v if v < 0. => Value::OutOfRange,
-                v => Value::Valid(v)
+        let number_of_channels = channels.len();
+
+        let mut values_means = vec![0.; number_of_channels];
+        let mut counts = vec![0; number_of_channels];
+        for (i, &value) in self.iter().enumerate() {
+            let idx = i % number_of_channels;
+            let current_mean = values_means.get_mut(idx).unwrap();
+            let current_count = counts.get_mut(idx).unwrap();
+            let value: f64 = value.into();
+            if value > 0. {
+                *current_count += 1;
+                *current_mean = *current_mean + (value - *current_mean) / *current_count as f64;
+            }
+        }
+
+        values_means.iter().zip(channels).zip(counts).map(|((&value, channel), counts)| {
+            let value = if counts == 0 {
+                Value::OutOfRange
+            } else {
+                Value::Valid(value)
             };
             ChannelValue { channel, value}
         }).collect()
@@ -492,7 +497,7 @@ mod tests {
     }
 
     #[test]
-    fn test_get_mean_scaled_out_of_range_test() {
+    fn test_get_mean_scaled_all_out_of_range_test() {
         let data = Data {
             channels: vec!["1".to_string(), "2".to_string(), "3".to_string()],
             raw_data: vec![],
@@ -501,6 +506,21 @@ mod tests {
         let means = data.get_mean_scaled();
         assert_eq!(means, vec![
             ChannelValue {channel: "1", value: crate::Value::OutOfRange},
+            ChannelValue {channel: "2", value: crate::Value::Valid(10. / 3.)},
+            ChannelValue {channel: "3", value: crate::Value::Valid(13. / 3.)}
+        ])
+    }
+
+    #[test]
+    fn test_get_mean_scaled_some_out_of_range_test() {
+        let data = Data {
+            channels: vec!["1".to_string(), "2".to_string(), "3".to_string()],
+            raw_data: vec![],
+            scaled_data: vec![-1.7976931348623157e308, 2., 3., 1., 5., 6., 1., 3., 4.],
+        };
+        let means = data.get_mean_scaled();
+        assert_eq!(means, vec![
+            ChannelValue {channel: "1", value: crate::Value::Valid(1.)},
             ChannelValue {channel: "2", value: crate::Value::Valid(10. / 3.)},
             ChannelValue {channel: "3", value: crate::Value::Valid(13. / 3.)}
         ])
