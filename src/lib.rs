@@ -321,10 +321,11 @@ impl Display for ERR_CODE {
     }
 }
 
+#[derive(Debug, Clone)]
 pub struct Data {
-    channels: Vec<String>,
-    raw_data: Vec<i32>,
-    scaled_data: Vec<f64>,
+    pub channels: Vec<String>,
+    pub raw_data: Vec<i32>,
+    pub scaled_data: Vec<f64>,
 }
 
 impl Data {
