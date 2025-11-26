@@ -1,5 +1,11 @@
 use std::{
-    error::Error, ffi::CString, fmt::{Debug, Display}, iter, net::Ipv4Addr, sync::LazyLock, vec
+    error::Error,
+    ffi::CString,
+    fmt::{Debug, Display},
+    iter,
+    net::Ipv4Addr,
+    sync::LazyLock,
+    vec,
 };
 
 #[allow(dead_code, non_camel_case_types, non_snake_case)]
@@ -12,9 +18,8 @@ pub use bindings::ME_SENSOR;
 use bindings::*;
 
 const MEDAQLIB_DLL: &str = "MEDAQLib.dll";
-static MEDAQLIB: LazyLock<MEDAQLib> = LazyLock::new(|| unsafe {
-    MEDAQLib::new(MEDAQLIB_DLL).expect("could not find dll")
-});
+static MEDAQLIB: LazyLock<MEDAQLib> =
+    LazyLock::new(|| unsafe { MEDAQLib::new(MEDAQLIB_DLL).expect("could not find dll") });
 
 /// Builder for creating new Sensor instance and connect to it
 ///
@@ -123,7 +128,11 @@ impl SensorBuilder {
         let param_name = param_name.as_ptr();
         let param_value = param_value.as_ptr();
 
-        unsafe { MEDAQLIB.SetParameterString(self.sensor_handle, param_name, param_value).into() }
+        unsafe {
+            MEDAQLIB
+                .SetParameterString(self.sensor_handle, param_name, param_value)
+                .into()
+        }
     }
 
     fn set_parameter_int(
@@ -134,7 +143,11 @@ impl SensorBuilder {
         let param_name = param_name.as_ptr();
         let param_value = param_value as i32;
 
-        unsafe { MEDAQLIB.SetParameterInt(self.sensor_handle, param_name, param_value).into() }
+        unsafe {
+            MEDAQLIB
+                .SetParameterInt(self.sensor_handle, param_name, param_value)
+                .into()
+        }
     }
 }
 
@@ -157,7 +170,9 @@ impl Sensor {
 
         let sensor_command = sensor_command.as_ptr();
         unsafe {
-            MEDAQLIB.ExecSCmd(self.sensor_handle, sensor_command).to_result()?;
+            MEDAQLIB
+                .ExecSCmd(self.sensor_handle, sensor_command)
+                .to_result()?;
         }
 
         for param_name in param_names_repeater {
@@ -171,12 +186,15 @@ impl Sensor {
             let return_value_ptr = c_string.into_raw();
             let max_len = &mut max_len as *mut u32;
             let return_value = unsafe {
-                if MEDAQLIB.GetParameterString(self.sensor_handle, param_name, return_value_ptr, max_len)
-                    .to_result().is_ok() {
-                        CString::from_raw(return_value_ptr)
-                    } else {
-                        CString::new("").expect("could not create cstring")
-                    }
+                if MEDAQLIB
+                    .GetParameterString(self.sensor_handle, param_name, return_value_ptr, max_len)
+                    .to_result()
+                    .is_ok()
+                {
+                    CString::from_raw(return_value_ptr)
+                } else {
+                    CString::new("").expect("could not create cstring")
+                }
             }
             .into_string()?;
 
@@ -242,14 +260,15 @@ impl Sensor {
             raw_data.set_len(max_values as usize);
             scaled_data.set_len(max_values as usize);
 
-            MEDAQLIB.TransferData(
-                self.sensor_handle,
-                raw_data.as_mut_ptr(),
-                scaled_data.as_mut_ptr(),
-                max_values,
-                &mut read,
-            )
-            .to_result()?;
+            MEDAQLIB
+                .TransferData(
+                    self.sensor_handle,
+                    raw_data.as_mut_ptr(),
+                    scaled_data.as_mut_ptr(),
+                    max_values,
+                    &mut read,
+                )
+                .to_result()?;
 
             // Adjust the lengths to the actual number of values read
             raw_data.set_len(read as usize);
@@ -330,7 +349,7 @@ pub struct Data {
 
 impl Data {
     /// Get raw values of very first measurement
-    pub fn get_first_raw(&self) ->  Vec<ChannelValue<'_, i32>> {
+    pub fn get_first_raw(&self) -> Vec<ChannelValue<'_, i32>> {
         self.raw_data.get_first(&self.channels)
     }
 
@@ -340,12 +359,12 @@ impl Data {
     }
 
     /// Get scaled values of very first measurement
-    pub fn get_first_scaled(&self) ->  Vec<ChannelValue<'_, f64>> {
+    pub fn get_first_scaled(&self) -> Vec<ChannelValue<'_, f64>> {
         self.scaled_data.get_first(&self.channels)
     }
 
     /// Calculates mean of scaled values for all channels
-    pub fn get_mean_scaled(&self) ->  Vec<ChannelValue<'_, f64>> {
+    pub fn get_mean_scaled(&self) -> Vec<ChannelValue<'_, f64>> {
         self.scaled_data.means(&self.channels)
     }
 }
@@ -364,16 +383,19 @@ impl<T: Display> Display for ChannelValue<'_, T> {
 
 impl Display for Data {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let means: Vec<_> = self.get_mean_scaled().iter().map(|ch| ch.to_string()).collect();
+        let means: Vec<_> = self
+            .get_mean_scaled()
+            .iter()
+            .map(|ch| ch.to_string())
+            .collect();
         write!(f, "{}", means.join(" "))
-        
     }
 }
 
 #[derive(Debug, PartialEq, Clone, Copy)]
 pub enum Value<T> {
     Valid(T),
-    OutOfRange
+    OutOfRange,
 }
 
 impl<T: Display> Display for Value<T> {
@@ -402,13 +424,13 @@ impl<T> Value<T> {
 }
 
 trait DataTransformation<'a, T> {
-    fn means(&'a self, channels: &'a[String]) -> Vec<ChannelValue<'a, f64>>;
+    fn means(&'a self, channels: &'a [String]) -> Vec<ChannelValue<'a, f64>>;
     fn get_first(&'a self, channels: &'a [String]) -> Vec<ChannelValue<'a, T>>;
 }
 
 impl<'a, T: 'a> DataTransformation<'a, T> for Vec<T>
 where
-    T: Clone + Copy + Into<f64>, 
+    T: Clone + Copy + Into<f64>,
 {
     fn means(&'a self, channels: &'a [String]) -> Vec<ChannelValue<'a, f64>> {
         let number_of_channels = channels.len();
@@ -426,25 +448,34 @@ where
             }
         }
 
-        values_means.iter().zip(channels).zip(counts).map(|((&value, channel), counts)| {
-            let value = if counts == 0 {
-                Value::OutOfRange
-            } else {
-                Value::Valid(value)
-            };
-            ChannelValue { channel, value}
-        }).collect()
+        values_means
+            .iter()
+            .zip(channels)
+            .zip(counts)
+            .map(|((&value, channel), counts)| {
+                let value = if counts == 0 {
+                    Value::OutOfRange
+                } else {
+                    Value::Valid(value)
+                };
+                ChannelValue { channel, value }
+            })
+            .collect()
     }
 
     fn get_first(&'a self, channels: &'a [String]) -> Vec<ChannelValue<'a, T>> {
         let values = &self[0..channels.len()];
-        values.iter().zip(channels).map(|(&value, channel)| {
-            let value = match value {
-                v if v.into() < 0. => Value::OutOfRange,
-                v => Value::Valid(v)
-            };
-            ChannelValue { channel, value}
-        }).collect()
+        values
+            .iter()
+            .zip(channels)
+            .map(|(&value, channel)| {
+                let value = match value {
+                    v if v.into() < 0. => Value::OutOfRange,
+                    v => Value::Valid(v),
+                };
+                ChannelValue { channel, value }
+            })
+            .collect()
     }
 }
 
@@ -460,11 +491,23 @@ mod tests {
             scaled_data: vec![],
         };
         let means = data.get_first_raw();
-        assert_eq!(means, vec![
-            ChannelValue {channel: "1", value: crate::Value::Valid(1)},
-            ChannelValue {channel: "2", value: crate::Value::Valid(2)},
-            ChannelValue {channel: "3", value: crate::Value::Valid(3)}
-        ])
+        assert_eq!(
+            means,
+            vec![
+                ChannelValue {
+                    channel: "1",
+                    value: crate::Value::Valid(1)
+                },
+                ChannelValue {
+                    channel: "2",
+                    value: crate::Value::Valid(2)
+                },
+                ChannelValue {
+                    channel: "3",
+                    value: crate::Value::Valid(3)
+                }
+            ]
+        )
     }
 
     #[test]
@@ -475,11 +518,23 @@ mod tests {
             scaled_data: vec![],
         };
         let means = data.get_mean_raw();
-        assert_eq!(means, vec![
-            ChannelValue {channel: "1", value: crate::Value::Valid(7. / 3.)},
-            ChannelValue {channel: "2", value: crate::Value::Valid(10. / 3.)},
-            ChannelValue {channel: "3", value: crate::Value::Valid(13. / 3.)}
-        ])
+        assert_eq!(
+            means,
+            vec![
+                ChannelValue {
+                    channel: "1",
+                    value: crate::Value::Valid(7. / 3.)
+                },
+                ChannelValue {
+                    channel: "2",
+                    value: crate::Value::Valid(10. / 3.)
+                },
+                ChannelValue {
+                    channel: "3",
+                    value: crate::Value::Valid(13. / 3.)
+                }
+            ]
+        )
     }
 
     #[test]
@@ -490,11 +545,23 @@ mod tests {
             scaled_data: vec![1., 2., 3., 4., 5., 6., 2., 3., 4.],
         };
         let means = data.get_mean_scaled();
-        assert_eq!(means, vec![
-            ChannelValue {channel: "1", value: crate::Value::Valid(7. / 3.)},
-            ChannelValue {channel: "2", value: crate::Value::Valid(10. / 3.)},
-            ChannelValue {channel: "3", value: crate::Value::Valid(13. / 3.)}
-        ])
+        assert_eq!(
+            means,
+            vec![
+                ChannelValue {
+                    channel: "1",
+                    value: crate::Value::Valid(7. / 3.)
+                },
+                ChannelValue {
+                    channel: "2",
+                    value: crate::Value::Valid(10. / 3.)
+                },
+                ChannelValue {
+                    channel: "3",
+                    value: crate::Value::Valid(13. / 3.)
+                }
+            ]
+        )
     }
 
     #[test]
@@ -502,14 +569,36 @@ mod tests {
         let data = Data {
             channels: vec!["1".to_string(), "2".to_string(), "3".to_string()],
             raw_data: vec![],
-            scaled_data: vec![-1.7976931348623157e308, 2., 3., -1.7976931348623157e308, 5., 6., -1.7976931348623157e308, 3., 4.],
+            scaled_data: vec![
+                -1.7976931348623157e308,
+                2.,
+                3.,
+                -1.7976931348623157e308,
+                5.,
+                6.,
+                -1.7976931348623157e308,
+                3.,
+                4.,
+            ],
         };
         let means = data.get_mean_scaled();
-        assert_eq!(means, vec![
-            ChannelValue {channel: "1", value: crate::Value::OutOfRange},
-            ChannelValue {channel: "2", value: crate::Value::Valid(10. / 3.)},
-            ChannelValue {channel: "3", value: crate::Value::Valid(13. / 3.)}
-        ])
+        assert_eq!(
+            means,
+            vec![
+                ChannelValue {
+                    channel: "1",
+                    value: crate::Value::OutOfRange
+                },
+                ChannelValue {
+                    channel: "2",
+                    value: crate::Value::Valid(10. / 3.)
+                },
+                ChannelValue {
+                    channel: "3",
+                    value: crate::Value::Valid(13. / 3.)
+                }
+            ]
+        )
     }
 
     #[test]
@@ -520,11 +609,23 @@ mod tests {
             scaled_data: vec![-1.7976931348623157e308, 2., 3., 1., 5., 6., 1., 3., 4.],
         };
         let means = data.get_mean_scaled();
-        assert_eq!(means, vec![
-            ChannelValue {channel: "1", value: crate::Value::Valid(1.)},
-            ChannelValue {channel: "2", value: crate::Value::Valid(10. / 3.)},
-            ChannelValue {channel: "3", value: crate::Value::Valid(13. / 3.)}
-        ])
+        assert_eq!(
+            means,
+            vec![
+                ChannelValue {
+                    channel: "1",
+                    value: crate::Value::Valid(1.)
+                },
+                ChannelValue {
+                    channel: "2",
+                    value: crate::Value::Valid(10. / 3.)
+                },
+                ChannelValue {
+                    channel: "3",
+                    value: crate::Value::Valid(13. / 3.)
+                }
+            ]
+        )
     }
 
     #[test]

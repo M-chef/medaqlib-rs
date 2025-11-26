@@ -1,9 +1,23 @@
 # medaqlib-rs - A Rust wrapper for MEDAQLib by micro-epsilon
 
-This is a Rust wrapper for the MEDAQLib C-Library. 
+This is a Rust wrapper for the MEDAQLib C-Library.
+
+
+# Dependencies
+- To run this crate version MEDAQLib-5.5.0.400 is used
+- bindgen-cli 0.72.1
+
+
+# Development
+- To create bindings place the MEDAQLib.h and MEDAQLib.lib in the root folder of the project
+- install bindgen-cli 0.72.1 (e.g. via `cargo binstall bindgen-cli` )
+- run 
+```
+bindgen MEDAQLib.h -o .\src\bindings.rs --allowlist-function ".*" --no-layout-tests --default-enum-style rust --dynamic-loading MEDAQLib -- -x c++
+```
+or just simply `cargo make bindgen`
 
 # Usage
-
 Setup the project
 - Download the library from micro-epsilon homepage: https://www.micro-epsilon.de/fileadmin/download/software/MEDAQLib.zip
 - Place the containing MEDAQLIB.dll where the executable can find it
